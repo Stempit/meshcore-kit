@@ -31,10 +31,10 @@ type Compressor func(o Options, text string, head int) []string
 
 // Options is the resolved fitting policy for one send path.
 type Options struct {
-	MaxBytes int       // hard limit; 0 → DefaultMaxBytes
-	Ellipsis string    // appended by truncate (counts toward the limit)
-	CyrToLat bool      // lossless Cyrillic→Latin homoglyph squeeze
-	Variant  Variant   // strategy; "" behaves as Truncate
+	MaxBytes int        // hard limit; 0 → DefaultMaxBytes
+	Ellipsis string     // appended by truncate (counts toward the limit)
+	CyrToLat bool       // lossless Cyrillic→Latin homoglyph squeeze
+	Variant  Variant    // strategy; "" behaves as Truncate
 	Compress Compressor // used by the LLM variant; nil → Split fallback
 }
 

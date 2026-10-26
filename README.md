@@ -12,6 +12,16 @@ bounded inbox with cursors, and keeping the link alive. The `fit` package
 solves the other universal problem — squeezing replies into the 140-byte mesh
 limit.
 
+## Install
+
+```sh
+go get github.com/stempit/meshcore-kit
+```
+
+The kit is deliberately config-free: callers resolve their own policy into
+plain structs (`ConnectOptions`, `fit.Options`), so it stays embeddable behind
+any app's configuration.
+
 ## Packages
 
 ### `companion`
