@@ -52,13 +52,13 @@ parts := fit.Fit(o, "@[user] ", []string{longReply}) // каждая часть 
 ```
 
 Приложения, которые разрешают политику из конфига, держат тонкую обёртку
-(см. `internal/shrink` в meshbot); алгоритмы живут здесь.
+(см. `internal/shrink` в meshcore-go-bot); алгоритмы живут здесь.
 
 ## Родственные проекты
 
 - [meshcore-go](https://github.com/stempit/meshcore-go) — драйвер протокола,
   на котором построен этот рантайм.
-- [meshbot](https://github.com/stempit/meshbot) — полноценный чат-бот в меше.
+- [meshcore-go-bot](https://github.com/stempit/meshcore-go-bot) — полноценный чат-бот в меше.
 - [meshcore-http-gateway](https://github.com/stempit/meshcore-http-gateway),
   [meshcore-mcp-gateway](https://github.com/stempit/meshcore-mcp-gateway) —
   шлюзы на этом рантайме.

@@ -52,13 +52,13 @@ parts := fit.Fit(o, "@[user] ", []string{longReply}) // each part ≤ 140 bytes
 ```
 
 Applications that resolve their policy from a config file keep a thin wrapper
-(see meshbot's `internal/shrink`); the algorithms live here.
+(see meshcore-go-bot's `internal/shrink`); the algorithms live here.
 
 ## Related projects
 
 - [meshcore-go](https://github.com/stempit/meshcore-go) — the protocol driver
   this runtime is built on.
-- [meshbot](https://github.com/stempit/meshbot) — the full-featured mesh chat
+- [meshcore-go-bot](https://github.com/stempit/meshcore-go-bot) — the full-featured mesh chat
   bot.
 - [meshcore-http-gateway](https://github.com/stempit/meshcore-http-gateway),
   [meshcore-mcp-gateway](https://github.com/stempit/meshcore-mcp-gateway) —
