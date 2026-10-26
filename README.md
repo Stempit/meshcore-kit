@@ -1,10 +1,10 @@
-# meshcore-companion 🧩📻
+# meshcore-kit 🧩📻
 
 **The shared app runtime for MeshCore devices: connect, sync, inbox, keepalive — and messages that always fit.**
 
 *[🇷🇺 Русская версия](README_RU.md)*
 
-`meshcore-companion` is what every application on top of
+`meshcore-kit` is what every application on top of
 [meshcore-go](https://github.com/stempit/meshcore-go) needs but nobody wants to
 write twice: opening the device connection (BLE or serial), pulling the
 messages stored while your app was down, forwarding live arrivals into a
