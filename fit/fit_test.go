@@ -135,6 +135,27 @@ func TestListEachItemIndependentPrefixFirstOnly(t *testing.T) {
 	}
 }
 
+func TestLaterMessagesUseFullBudget(t *testing.T) {
+	// The prefix reserve applies to the FIRST emitted msg only; later msgs
+	// must be cut to the full budget. Space-free text makes the cut land
+	// exactly on the limit, so the lengths are exact.
+	prefix := "P: "
+	word := strings.Repeat("x", 400)
+	out := Fit(opts(Truncate), prefix, []string{word, word})
+	if len(out) != 2 {
+		t.Fatalf("expected 2 msgs, got %d: %v", len(out), out)
+	}
+	if !strings.HasPrefix(out[0], prefix) {
+		t.Errorf("first msg missing prefix: %q", out[0])
+	}
+	if len(out[0]) != max {
+		t.Errorf("first msg = %d bytes, want %d (prefix + prefix-reduced budget)", len(out[0]), max)
+	}
+	if len(out[1]) != max {
+		t.Errorf("second msg = %d bytes, want %d (full budget, prefix reserve lifted)", len(out[1]), max)
+	}
+}
+
 func TestSkippedFirstItemMovesPrefixToNext(t *testing.T) {
 	// First item is dropped by skip; the prefix must land on the next emitted msg.
 	prefix := "P: "
