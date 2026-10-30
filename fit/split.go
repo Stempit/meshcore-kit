@@ -17,7 +17,7 @@ const (
 // into up to 9 rune-safe "[i/N]" parts. Exported so injected Compressors can
 // fall back to it.
 func SplitParts(o Options, text string, head int) []string {
-	return split(o.Squeeze(strings.TrimSpace(text)), o.Max(), head, o.Ellipsis)
+	return split(o.Squeeze(text), o.Max(), head, o.Ellipsis)
 }
 
 // split breaks text into up to maxParts rune-safe chunks, each suffixed with a

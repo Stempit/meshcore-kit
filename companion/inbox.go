@@ -6,8 +6,8 @@ import (
 )
 
 // maxInboxSize caps the unread queue. When the cap is exceeded the OLDEST
-// messages are dropped (with a log by the caller-visible counter), so a client
-// that never polls cannot grow the queue without bound.
+// messages are dropped, so a client that never polls cannot grow the queue
+// without bound.
 const maxInboxSize = 1000
 
 // Message is one received mesh message, normalized for consumers (HTTP JSON,
@@ -29,10 +29,9 @@ type Message struct {
 // Inbox is a bounded FIFO of unread messages safe for concurrent use. Producers
 // (the live forwarder, the startup device sync) call Add; GET /get calls Drain.
 type Inbox struct {
-	mu      sync.Mutex
-	msgs    []Message
-	lastID  int64 // highest ID assigned so far (0 when none)
-	dropped int64 // total messages dropped due to the cap, for logging
+	mu     sync.Mutex
+	msgs   []Message
+	lastID int64 // highest ID assigned so far (0 when none)
 }
 
 // Add appends msg, assigning it the next sequential ID and ReceivedAt (when
@@ -50,7 +49,6 @@ func (in *Inbox) Add(msg Message) Message {
 	if len(in.msgs) >= maxInboxSize {
 		overflow := len(in.msgs) - maxInboxSize + 1
 		in.msgs = append(in.msgs[:0], in.msgs[overflow:]...)
-		in.dropped += int64(overflow)
 	}
 	in.msgs = append(in.msgs, msg)
 	return msg
