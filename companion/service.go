@@ -1,9 +1,9 @@
 // Package companion is the shared app runtime for a MeshCore device:
-// transport selection (BLE by default, or USB serial), the startup
-// stored-message sync, a live forwarder into an Inbox, and the
-// keepalive/reconnect loop. Each application runs its own Service — one
-// companion connection per physical device. The wire protocol itself lives
-// in github.com/stempit/meshcore-go.
+// transport selection (BLE by default, USB serial, or TCP over Wi-Fi/
+// Ethernet), the startup stored-message sync, a live forwarder into an
+// Inbox, and the keepalive/reconnect loop. Each application runs its own
+// Service — one companion connection per physical device. The wire protocol
+// itself lives in github.com/stempit/meshcore-go.
 package companion
 
 import (
@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/stempit/meshcore-go"
@@ -20,19 +21,33 @@ import (
 // config section of the applications so they can map their own config onto
 // this package without a shared config dependency.
 type ConnectOptions struct {
-	// Type selects the transport: "bt" (Bluetooth LE, default) or "serial" (USB/UART).
+	// Type selects the transport: "bt" (Bluetooth LE, default), "serial"
+	// (USB/UART) or "tcp" (alias "wifi": Wi-Fi/Ethernet companion firmware).
 	Type string
 	// SerialPort is the OS device path used when Type is "serial"
 	// (e.g. "/dev/ttyUSB0", "/dev/tty.usbmodem14101", "COM3").
 	SerialPort string
 	// SerialBaud sets the baud rate for the serial transport (default 115200).
 	SerialBaud int
+	// TCPAddress is the device address used when Type is "tcp" — the Wi-Fi or
+	// Ethernet companion firmware serves the same protocol on TCP. Either
+	// "host:port" or a bare host, which gets the firmware default port 5000.
+	TCPAddress string
+	// DeviceName selects the BLE device by exact advertised name (e.g.
+	// "MeshCore-AB12") when Type is "bt". Empty scans any MeshCore device and
+	// picks the strongest signal. The portable identifier on macOS, where the
+	// address is a per-machine CoreBluetooth UUID.
+	DeviceName string
+	// DeviceAddress selects the BLE device by platform address when Type is
+	// "bt" (MAC on Linux/Windows, CoreBluetooth UUID on macOS). Combine with
+	// DeviceName or use alone.
+	DeviceAddress string
 }
 
 // Connect opens the meshcore companion device per opts — BLE scan by default,
-// or USB serial when opts.Type is "serial" — and returns a ready client. The
-// underlying constructors log and panic when the transport itself cannot be
-// established; only configuration errors come back as an error.
+// USB serial or TCP (Wi-Fi/Ethernet) when asked — and returns a ready client.
+// The underlying constructors log and panic when the transport itself cannot
+// be established; only configuration errors come back as an error.
 func Connect(opts ConnectOptions) (*meshcore.MeshCoreClient, error) {
 	switch opts.Type {
 	case "serial":
@@ -44,9 +59,30 @@ func Connect(opts ConnectOptions) (*meshcore.MeshCoreClient, error) {
 			baud = 115200
 		}
 		return meshcore.CreateSerialClient(opts.SerialPort, baud), nil
+	case "tcp", "wifi":
+		if opts.TCPAddress == "" {
+			return nil, errors.New(`Connection.tcp_address must be set when Connection.type is "tcp"`)
+		}
+		return meshcore.CreateTCPClient(tcpDialAddr(opts.TCPAddress)), nil
 	default:
-		return meshcore.CreateClient(), nil
+		var ble []meshcore.BLEOption
+		if opts.DeviceName != "" {
+			ble = append(ble, meshcore.WithDeviceName(opts.DeviceName))
+		}
+		if opts.DeviceAddress != "" {
+			ble = append(ble, meshcore.WithDeviceAddress(opts.DeviceAddress))
+		}
+		return meshcore.CreateClient(ble...), nil
 	}
+}
+
+// tcpDialAddr accepts a bare host and appends the companion firmware's
+// default TCP port; "host:port" passes through unchanged.
+func tcpDialAddr(addr string) string {
+	if strings.Contains(addr, ":") {
+		return addr
+	}
+	return addr + ":5000"
 }
 
 // Service pairs a connected client with an Inbox and owns the device-side
@@ -134,8 +170,8 @@ func (s *Service) startForwarder() {
 	}()
 }
 
-// keepalive polls device stats; a failed request on a disconnected BLE link
-// triggers a reconnect.
+// keepalive polls device stats; a failed request on a disconnected link
+// (BLE, serial or TCP) triggers a reconnect.
 func (s *Service) keepalive(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -145,7 +181,7 @@ func (s *Service) keepalive(ctx context.Context) {
 			if err := s.Client.RequestAllStats(); err != nil {
 				s.log.Error("Failed to request periodic stats", "error", err)
 				if !s.Client.IsConnected() {
-					s.log.Warn("BLE connection lost, reconnecting...")
+					s.log.Warn("Connection lost, reconnecting...")
 					time.Sleep(5 * time.Second)
 					if err := s.Client.Reconnect(); err != nil {
 						s.log.Error("Reconnect failed", "error", err)

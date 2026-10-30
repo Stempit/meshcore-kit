@@ -6,7 +6,7 @@
 
 `meshcore-kit` is what every application on top of
 [meshcore-go](https://github.com/stempit/meshcore-go) needs but nobody wants to
-write twice: opening the device connection (BLE or serial), pulling the
+write twice: opening the device connection (BLE, serial or TCP over Wi-Fi/Ethernet), pulling the
 messages stored while your app was down, forwarding live arrivals into a
 bounded inbox with cursors, and keeping the link alive. The `fit` package
 solves the other universal problem — squeezing replies into the 140-byte mesh
@@ -26,7 +26,9 @@ any app's configuration.
 
 ### `companion`
 
-- `Connect(ConnectOptions)` — BLE scan by default, USB serial when asked.
+- `Connect(ConnectOptions)` — BLE scan by default (with optional device
+  name/address selection), USB serial when asked, or TCP (`"host:port"`,
+  default port 5000) for Wi-Fi/Ethernet companion firmware.
 - `Service` — startup stored-message sync (bounded), a live forwarder into the
   inbox, and a 30s keepalive/reconnect loop.
 - `Inbox` — a bounded (1000) FIFO of normalized DM/channel messages with
