@@ -29,6 +29,11 @@ func TestConnectValidationErrors(t *testing.T) {
 			opts: ConnectOptions{Type: "wifi"},
 			want: `tcp_address must be set`,
 		},
+		{
+			name: "unknown type is a config error, not a silent BLE fallback",
+			opts: ConnectOptions{Type: "serieal"},
+			want: `unknown Connection.type`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -52,6 +57,8 @@ func TestTcpDialAddr(t *testing.T) {
 		{"meshcore.local", "meshcore.local:5000"},
 		{"192.168.1.50:5001", "192.168.1.50:5001"},
 		{"192.168.1.50:80", "192.168.1.50:80"},
+		{"::1", "[::1]:5000"},        // bare IPv6 literal needs brackets
+		{"[::1]:5000", "[::1]:5000"}, // already bracketed: pass through
 	}
 	for _, tt := range tests {
 		if got := tcpDialAddr(tt.in); got != tt.want {

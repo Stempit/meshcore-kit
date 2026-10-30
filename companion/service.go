@@ -11,7 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
+	"net"
+	"sync"
 	"time"
 
 	"github.com/stempit/meshcore-go"
@@ -23,6 +24,7 @@ import (
 type ConnectOptions struct {
 	// Type selects the transport: "bt" (Bluetooth LE, default), "serial"
 	// (USB/UART) or "tcp" (alias "wifi": Wi-Fi/Ethernet companion firmware).
+	// Any other non-empty value is a configuration error.
 	Type string
 	// SerialPort is the OS device path used when Type is "serial"
 	// (e.g. "/dev/ttyUSB0", "/dev/tty.usbmodem14101", "COM3").
@@ -64,7 +66,7 @@ func Connect(opts ConnectOptions) (*meshcore.MeshCoreClient, error) {
 			return nil, errors.New(`Connection.tcp_address must be set when Connection.type is "tcp"`)
 		}
 		return meshcore.CreateTCPClient(tcpDialAddr(opts.TCPAddress)), nil
-	default:
+	case "", "bt":
 		var ble []meshcore.BLEOption
 		if opts.DeviceName != "" {
 			ble = append(ble, meshcore.WithDeviceName(opts.DeviceName))
@@ -73,16 +75,19 @@ func Connect(opts ConnectOptions) (*meshcore.MeshCoreClient, error) {
 			ble = append(ble, meshcore.WithDeviceAddress(opts.DeviceAddress))
 		}
 		return meshcore.CreateClient(ble...), nil
+	default:
+		return nil, fmt.Errorf(`unknown Connection.type %q: want "bt", "serial" or "tcp"`, opts.Type)
 	}
 }
 
 // tcpDialAddr accepts a bare host and appends the companion firmware's
-// default TCP port; "host:port" passes through unchanged.
+// default TCP port; "host:port" passes through unchanged. A bare IPv6
+// literal is bracketed, since a port cannot be appended to it directly.
 func tcpDialAddr(addr string) string {
-	if strings.Contains(addr, ":") {
+	if _, _, err := net.SplitHostPort(addr); err == nil {
 		return addr
 	}
-	return addr + ":5000"
+	return net.JoinHostPort(addr, "5000")
 }
 
 // Service pairs a connected client with an Inbox and owns the device-side
@@ -109,30 +114,35 @@ const (
 // the live forwarder and keepalive loops run until ctx is cancelled.
 func (s *Service) Start(ctx context.Context) {
 	s.syncStored(ctx)
-	s.startForwarder()
+	s.startForwarder(ctx)
 	go s.keepalive(ctx)
 }
 
 // syncStored pulls messages stored on the device while the process was down
 // into the inbox, so they arrive as unread on the first read.
 func (s *Service) syncStored(ctx context.Context) {
+	// "No more messages" can arrive more than once (the device reports it at
+	// the end of every sync cycle, and meshcore-go also re-syncs on its own),
+	// so the close is guarded: a second callback must not panic.
+	var once sync.Once
 	syncDone := make(chan struct{})
-	s.Client.OnNoMoreMessages(func() { close(syncDone) })
+	s.Client.OnNoMoreMessages(func() { once.Do(func() { close(syncDone) }) })
 	if err := s.Client.SyncNextMessage(); err != nil {
+		// The device won't answer the sync request (e.g. the transport just
+		// died); proceed with the stored-message dump below.
 		s.log.Error("Failed to sync stored messages", "error", err)
-		close(syncDone)
-	}
-
-	select {
-	case <-syncDone:
-		s.log.Info("Device sync complete")
-	case <-time.After(syncWait):
-		s.log.Warn("Device sync timed out, proceeding with messages received so far")
-	case <-ctx.Done():
-		return
+	} else {
+		select {
+		case <-syncDone:
+			s.log.Info("Device sync complete")
+		case <-time.After(syncWait):
+			s.log.Warn("Device sync timed out, proceeding with messages received so far")
+		case <-ctx.Done():
+			return
+		}
 	}
 	// Neutralize the callback: a late "no more messages" during live operation
-	// would panic on the already-closed syncDone channel.
+	// is already harmless (guarded close) but has no business running.
 	s.Client.OnNoMoreMessages(func() {})
 
 	// Give the BLE device time to settle after the sync loop before any send.
@@ -156,18 +166,65 @@ drainLoop:
 	s.log.Info("Stored messages queued as unread", "count", s.Inbox.Len())
 }
 
-// startForwarder pumps live arrivals into the inbox.
-func (s *Service) startForwarder() {
-	go func() {
-		for msg := range s.Client.IncomingMessages() {
+// lostPoll is how often the forwarder checks the connection state. It only
+// bounds how quickly a lost connection is noticed — the keepalive loop does
+// the actual reconnecting.
+const lostPoll = time.Second
+
+// startForwarder pumps live arrivals into the inbox for as long as the
+// service runs.
+func (s *Service) startForwarder(ctx context.Context) {
+	go forwardLoop(ctx, lostPoll, s.Client.IncomingMessages, s.Client.IsConnected,
+		func(msg interface{}) {
 			switch m := msg.(type) {
 			case *meshcore.Message:
 				s.Inbox.Add(dmMessage(s.Client, m))
 			case *meshcore.ChannelMessage:
 				s.Inbox.Add(channelMessage(s.Client, m))
 			}
+		})
+}
+
+// forwardLoop dispatches messages from the client's incoming channel until ctx
+// is cancelled. The channel must be re-acquired per connection generation:
+// meshcore-go publishes a fresh channel on every (re)connect, and after a
+// connection loss the previous one stays open but silent (markDisconnected),
+// so neither closure nor silence alone marks the end of a generation. When
+// the current channel goes stale — closed, or connected() turns false — the
+// loop waits for channel() to return a different channel: Connect publishes
+// the new one before setting connected=true, so a fresh read after
+// IsConnected()=true is always the next generation.
+func forwardLoop(ctx context.Context, poll time.Duration, channel func() <-chan interface{}, connected func() bool, handle func(interface{})) {
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+	for {
+		ch := channel()
+	readLoop:
+		for {
+			select {
+			case msg, ok := <-ch:
+				if !ok {
+					break readLoop // Disconnect() closed this generation
+				}
+				handle(msg)
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if !connected() {
+					break readLoop // connection lost; this generation goes silent
+				}
+			}
 		}
-	}()
+		// Wait for the next generation to be published (or for shutdown; an
+		// app that Disconnects without cancelling ctx just idles here).
+		for channel() == ch {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}
 }
 
 // keepalive polls device stats; a failed request on a disconnected link
@@ -201,8 +258,13 @@ func (s *Service) keepalive(ctx context.Context) {
 func dmMessage(client *meshcore.MeshCoreClient, m *meshcore.Message) Message {
 	prefix := min(6, len(m.SenderKey))
 	sender := fmt.Sprintf("?%x", m.SenderKey[:prefix])
-	if c := client.FindContactByKeyPrefix(m.SenderKey[:prefix]); c != nil {
-		sender = c.Name
+	// An empty key must not reach the lookup: FindContactByKeyPrefix("")
+	// matches every contact (an empty prefix is equal to any key prefix),
+	// so the first contact would be misreported as the sender.
+	if prefix > 0 {
+		if c := client.FindContactByKeyPrefix(m.SenderKey[:prefix]); c != nil {
+			sender = c.Name
+		}
 	}
 	return Message{
 		Type:         "dm",
