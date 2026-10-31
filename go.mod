@@ -2,7 +2,7 @@ module github.com/stempit/meshcore-kit
 
 go 1.27.1
 
-require github.com/stempit/meshcore-go v0.1.0
+require github.com/stempit/meshcore-go v0.2.0
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
