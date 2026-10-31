@@ -78,10 +78,18 @@ func (in *Inbox) Len() int {
 }
 
 // Since returns the pending messages with ID greater than after, in arrival
-// order, without removing them. It backs the cursor-based GET /messages
-// endpoint, where the client tracks the last ID it has seen. The result is
-// never nil.
+// order, without removing them. The result is never nil. Cursor-style
+// clients that also read LastID should prefer SinceWithLastID.
 func (in *Inbox) Since(after int64) []Message {
+	msgs, _ := in.SinceWithLastID(after)
+	return msgs
+}
+
+// SinceWithLastID is Since and LastID read under one lock. Calling the two
+// separately leaves a window where a message is added in between: it is
+// absent from the returned messages but included in lastID, so a client
+// that adopted that lastID as its cursor would skip it.
+func (in *Inbox) SinceWithLastID(after int64) ([]Message, int64) {
 	in.mu.Lock()
 	defer in.mu.Unlock()
 
@@ -94,7 +102,7 @@ func (in *Inbox) Since(after int64) []Message {
 	if out == nil {
 		out = []Message{}
 	}
-	return out
+	return out, in.lastID
 }
 
 // LastID returns the highest message ID assigned so far (0 when none). A

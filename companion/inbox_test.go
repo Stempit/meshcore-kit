@@ -110,3 +110,39 @@ func TestInboxLastID(t *testing.T) {
 		t.Errorf("message after cursor not newer: %d <= %d", next.ID, cursor)
 	}
 }
+
+func TestInboxSinceWithLastID(t *testing.T) {
+	in := &Inbox{}
+	if msgs, lastID := in.SinceWithLastID(0); len(msgs) != 0 || lastID != 0 || msgs == nil {
+		t.Errorf("empty inbox: got %v, lastID %d; want empty non-nil slice, 0", msgs, lastID)
+	}
+
+	a := in.Add(Message{Type: "dm", Text: "a"})
+	b := in.Add(Message{Type: "channel", Text: "b"})
+
+	msgs, lastID := in.SinceWithLastID(0)
+	if len(msgs) != 2 || lastID != b.ID {
+		t.Errorf("full read: got %d messages, lastID %d; want 2, %d", len(msgs), lastID, b.ID)
+	}
+
+	msgs, lastID = in.SinceWithLastID(a.ID)
+	if len(msgs) != 1 || msgs[0].Text != "b" || lastID != b.ID {
+		t.Errorf("after %d: got %v, lastID %d; want only %q, %d", a.ID, msgs, lastID, "b", b.ID)
+	}
+
+	// The pair must be consistent: lastID never outruns the returned
+	// messages (the Since+LastID two-step race this method exists for).
+	msgs, lastID = in.SinceWithLastID(b.ID)
+	if len(msgs) != 0 || lastID != b.ID {
+		t.Errorf("after newest: got %d messages, lastID %d; want 0, %d", len(msgs), lastID, b.ID)
+	}
+
+	// Since must keep behaving through the shared implementation (and stay
+	// non-destructive and non-nil).
+	if got := in.Since(a.ID); len(got) != 1 || got[0].Text != "b" {
+		t.Errorf("Since after %d: got %v, want only %q", a.ID, got, "b")
+	}
+	if got := in.Since(0); got == nil || len(got) != 2 {
+		t.Errorf("Since(0) = %v, want the same two messages", got)
+	}
+}
